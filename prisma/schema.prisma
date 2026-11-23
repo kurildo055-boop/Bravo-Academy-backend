@@ -1,0 +1,304 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User role enum equivalent in SQLite (STUDENT, ADMIN)
+model User {
+  id            String          @id @default(uuid())
+  email         String          @unique
+  passwordHash  String
+  name          String
+  phone         String?
+  role          String          @default("STUDENT") // "STUDENT" | "ADMIN"
+  targetForce   String?         @default("ARMY")    // "ARMY" | "NAVY" | "AIR_FORCE"
+  avatarUrl     String?
+  isActive      Boolean         @default(true)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  studentProfile StudentProfile?
+  enrollments    Enrollment[]
+  payments       Payment[]
+  examAttempts   ExamAttempt[]
+  aiEvaluations  AiEvaluation[]
+  notifications  Notification[]
+}
+
+model StudentProfile {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  batchNumber     String?
+  hscResult       String?
+  sscResult       String?
+  heightInches    Float?
+  weightKg        Float?
+  medicalStatus   String?
+  preparationGoal String?
+  bio             String?
+  updatedAt       DateTime @updatedAt
+}
+
+model Course {
+  id                 String          @id @default(uuid())
+  title              String
+  slug               String          @unique
+  description        String
+  thumbnail          String?
+  targetForce        String          @default("ALL") // "ALL" | "ARMY" | "NAVY" | "AIR_FORCE"
+  category           String          @default("ISSB_FULL")
+  regularPrice       Float           @default(5000)
+  discountPrice      Float           @default(2999)
+  validityDays       Int             @default(90)
+  durationWeeks      Int             @default(8)
+  status             String          @default("PUBLISHED") // "DRAFT" | "PUBLISHED" | "ARCHIVED"
+  isFeatured         Boolean         @default(false)
+  curriculum         String?         // JSON string array of modules
+  includedFeatures   String?         // Comma-separated or JSON list of features
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  enrollments        Enrollment[]
+}
+
+model Enrollment {
+  id           String    @id @default(uuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId     String
+  course       Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  status       String    @default("ACTIVE") // "ACTIVE" | "EXPIRED" | "SUSPENDED" | "PENDING"
+  enrolledAt   DateTime  @default(now())
+  expiresAt    DateTime
+  paymentId    String?
+
+  @@index([userId])
+  @@index([courseId])
+}
+
+model Payment {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId       String
+  amount         Float
+  currency       String    @default("BDT")
+  paymentMethod  String    // "BKASH" | "NAGAD"
+  transactionId  String?   @unique
+  invoiceNumber  String    @unique
+  status         String    @default("PENDING") // "PENDING" | "COMPLETED" | "FAILED" | "CANCELLED"
+  gatewayRef     String?
+  senderNumber   String?
+  createdAt      DateTime  @default(now())
+  verifiedAt     DateTime?
+
+  @@index([userId])
+  @@index([transactionId])
+}
+
+model ExamCategory {
+  id          String     @id @default(uuid())
+  name        String     @unique
+  slug        String     @unique
+  description String?
+  questions   Question[]
+}
+
+model Question {
+  id              String         @id @default(uuid())
+  questionText    String
+  categoryId      String
+  category        ExamCategory   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  subcategory     String?
+  difficulty      String         @default("MEDIUM") // "EASY" | "MEDIUM" | "HARD"
+  questionType    String         @default("MCQ")    // "MCQ" | "IMAGE_MCQ" | "TEXT"
+  correctAnswer   String?        // "A" | "B" | "C" | "D"
+  explanation     String?
+  timeLimitSec    Int            @default(30)
+  imageUrl        String?
+  tags            String?
+  sourceInfo      String?        @default("BRAVO_ORIGINAL")
+  isPublished     Boolean        @default(true)
+  isAiGenerated   Boolean        @default(false)
+  confidenceScore Float?         @default(1.0)
+  requiresReview  Boolean        @default(false)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  options         QuestionOption[]
+  examAnswers     ExamAnswer[]
+
+  @@index([categoryId])
+  @@index([difficulty])
+  @@index([isPublished])
+}
+
+model QuestionOption {
+  id          String   @id @default(uuid())
+  questionId  String
+  question    Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  key         String   // "A", "B", "C", "D"
+  text        String
+  imageUrl    String?
+
+  @@index([questionId])
+}
+
+model QuestionImportJob {
+  id              String               @id @default(uuid())
+  jobName         String
+  fileName        String
+  fileType        String               // "IMAGE", "PDF", "DOCX", "CSV", "PASTE", "AI_GEN"
+  totalDetected   Int                  @default(0)
+  successCount    Int                  @default(0)
+  failedCount     Int                  @default(0)
+  status          String               @default("COMPLETED") // "PROCESSING" | "COMPLETED" | "FAILED"
+  createdAt       DateTime             @default(now())
+  items           QuestionImportItem[]
+}
+
+model QuestionImportItem {
+  id              String            @id @default(uuid())
+  jobId           String
+  job             QuestionImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  rawText         String?
+  questionText    String
+  optionsJson     String?           // JSON of options
+  detectedAnswer  String?
+  categoryHint    String?
+  confidence      Float             @default(0.9)
+  pageNumber      Int?              @default(1)
+  cropImageUrl    String?
+  status          String            @default("PENDING_REVIEW") // "PENDING_REVIEW" | "APPROVED" | "REJECTED"
+  createdAt       DateTime          @default(now())
+
+  @@index([jobId])
+}
+
+model Exam {
+  id             String        @id @default(uuid())
+  title          String
+  slug           String        @unique
+  examType       String        // "IQ", "PPDT", "PSYCHOLOGY", "MOCK", "SIMULATION"
+  durationMinutes Int          @default(40)
+  totalQuestions Int           @default(50)
+  passingScore   Float         @default(60.0)
+  instructions   String?
+  targetForce    String        @default("ALL")
+  isActive       Boolean       @default(true)
+  createdAt      DateTime      @default(now())
+
+  attempts       ExamAttempt[]
+}
+
+model ExamAttempt {
+  id             String       @id @default(uuid())
+  examId         String
+  exam           Exam         @relation(fields: [examId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startedAt      DateTime     @default(now())
+  completedAt    DateTime?
+  score          Float?
+  totalScore     Float?
+  isPassed       Boolean?
+  timeSpentSec   Int          @default(0)
+  status         String       @default("IN_PROGRESS") // "IN_PROGRESS" | "COMPLETED" | "AUTO_SUBMITTED"
+
+  answers        ExamAnswer[]
+
+  @@index([userId])
+  @@index([examId])
+}
+
+model ExamAnswer {
+  id           String      @id @default(uuid())
+  attemptId    String
+  attempt      ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  questionId   String
+  question     Question    @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  chosenAnswer String?
+  isCorrect    Boolean?
+  timeSpentSec Int         @default(0)
+
+  @@index([attemptId])
+  @@index([questionId])
+}
+
+model AiEvaluation {
+  id               String   @id @default(uuid())
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  evaluationType   String   // "PPDT_STORY" | "TAT" | "WAT" | "SCT" | "SRT" | "INTERVIEW"
+  promptContent    String
+  userSubmission   String
+  aiScore          Float?
+  analysisJson     String   // Structured JSON with summary, strengths, improvements
+  instructorNotes  String?
+  createdAt        DateTime @default(now())
+
+  @@index([userId])
+}
+
+model HomepageContent {
+  id             String   @id @default("default-homepage")
+  heroTitle      String   @default("YOUR DEFENSE JOURNEY STARTS HERE")
+  heroSubtitle   String   @default("Complete ISSB Preparation for Army, Navy & Air Force Officer Candidates.")
+  primaryCtaText String   @default("START IQ PRACTICE")
+  primaryCtaLink String   @default("/exam/iq")
+  secondaryCtaText String @default("EXPLORE COURSES")
+  secondaryCtaLink String @default("/courses")
+  announcementText String @default("Batch 93 BMA Long Course & 84 BAFA Special Prep Open! Enroll Today.")
+  updatedAt      DateTime @updatedAt
+}
+
+model FacebookVideo {
+  id          String   @id @default(uuid())
+  title       String
+  videoUrl    String
+  embedUrl    String?
+  thumbnail   String?
+  description String?
+  orderIndex  Int      @default(0)
+  isPublished Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}
+
+model Testimonial {
+  id             String   @id @default(uuid())
+  candidateName  String
+  forceSelected  String   // "Bangladesh Army", "Bangladesh Navy", "Bangladesh Air Force"
+  cadetCourse    String   // e.g. "89 BMA Long Course", "76 BAFA"
+  reviewText     String
+  rating         Int      @default(5)
+  avatarUrl      String?
+  isFeatured     Boolean  @default(true)
+  createdAt      DateTime @default(now())
+}
+
+model FaqItem {
+  id         String   @id @default(uuid())
+  question   String
+  answer     String
+  category   String   @default("GENERAL")
+  orderIndex Int      @default(0)
+  createdAt  DateTime @default(now())
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String   @default("INFO") // "INFO" | "SUCCESS" | "WARNING" | "EXAM"
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
