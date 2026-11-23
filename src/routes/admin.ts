@@ -300,4 +300,130 @@ router.put('/cms', async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/admin/students (List all registered cadet aspirants)
+router.get('/students', async (req: Request, res: Response) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+
+    const { q, force } = req.query;
+    const where: any = { role: 'STUDENT' };
+
+    if (force && force !== 'ALL') {
+      where.targetForce = String(force);
+    }
+
+    if (q) {
+      const searchStr = String(q).trim();
+      where.OR = [
+        { name: { contains: searchStr, mode: 'insensitive' } },
+        { email: { contains: searchStr, mode: 'insensitive' } },
+        { phone: { contains: searchStr, mode: 'insensitive' } },
+      ];
+    }
+
+    const students = await prisma.user.findMany({
+      where,
+      include: {
+        studentProfile: true,
+        enrollments: {
+          include: {
+            course: {
+              select: {
+                id: true,
+                title: true,
+                slug: true,
+                targetForce: true,
+                discountPrice: true
+              }
+            }
+          },
+          orderBy: { enrolledAt: 'desc' }
+        },
+        payments: {
+          include: {
+            course: {
+              select: {
+                id: true,
+                title: true
+              }
+            }
+          },
+          orderBy: { createdAt: 'desc' }
+        },
+        _count: {
+          select: {
+            examAttempts: true
+          }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    return res.json({ success: true, students });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/admin/students/:id/grant-course (Direct course grant to cadet)
+router.post('/students/:id/grant-course', async (req: Request, res: Response) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+
+    const { id: userId } = req.params;
+    const { courseId, validityDays } = req.body;
+
+    const course = await prisma.course.findUnique({ where: { id: courseId } });
+    if (!course) {
+      return res.status(404).json({ success: false, error: 'Course not found.' });
+    }
+
+    const days = Number(validityDays) || course.validityDays || 90;
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + days);
+
+    const existingEnrollment = await prisma.enrollment.findFirst({
+      where: { userId, courseId }
+    });
+
+    let enrollment;
+    if (existingEnrollment) {
+      enrollment = await prisma.enrollment.update({
+        where: { id: existingEnrollment.id },
+        data: {
+          status: 'ACTIVE',
+          expiresAt
+        }
+      });
+    } else {
+      enrollment = await prisma.enrollment.create({
+        data: {
+          userId,
+          courseId,
+          status: 'ACTIVE',
+          expiresAt
+        }
+      });
+    }
+
+    return res.json({ success: true, enrollment });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/admin/students/:id (Delete cadet account)
+router.delete('/students/:id', async (req: Request, res: Response) => {
+  try {
+    if (!requireAdmin(req, res)) return;
+
+    const { id } = req.params;
+    await prisma.user.delete({ where: { id } });
+
+    return res.json({ success: true, message: 'Student account deleted.' });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 export default router;
