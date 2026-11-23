@@ -125,6 +125,7 @@ model Question {
   questionText    String
   categoryId      String
   category        ExamCategory   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  iqSection       String         @default("VERBAL") // "VERBAL" | "NON_VERBAL"
   subcategory     String?
   difficulty      String         @default("MEDIUM") // "EASY" | "MEDIUM" | "HARD"
   questionType    String         @default("MCQ")    // "MCQ" | "IMAGE_MCQ" | "TEXT"
@@ -145,6 +146,7 @@ model Question {
   examAnswers     ExamAnswer[]
 
   @@index([categoryId])
+  @@index([iqSection])
   @@index([difficulty])
   @@index([isPublished])
 }
@@ -158,6 +160,84 @@ model QuestionOption {
   imageUrl    String?
 
   @@index([questionId])
+}
+
+// Option 4: PPDT Scenarios Bank
+model PpdtScenario {
+  id              String   @id @default(uuid())
+  title           String
+  imageUrl        String   // Hazy perception picture URL / base64
+  description     String?
+  characterHints  String?  // JSON: e.g. [{ age: 24, sex: "M", mood: "+", role: "Protagonist" }]
+  modelStory      String?  // High-scoring benchmark story
+  tips            String?  // Tactical dos and don'ts
+  difficulty      String   @default("MEDIUM")
+  isPublished     Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// Option 5: Psychology Battery Items (WAT, TAT, SCT, SRT, SD)
+model PsychologyItem {
+  id              String   @id @default(uuid())
+  testType        String   // "WAT" | "TAT" | "SCT" | "SRT" | "SD"
+  promptText      String   // Word for WAT, sentence stem for SCT, dilemma for SRT
+  imageUrl        String?  // Slide picture for TAT
+  timeLimitSec    Int      @default(15) // 15s for WAT, 240s for TAT, 30s for SCT
+  sampleAnswer    String?  // Officer-like sample response
+  category        String?  // e.g. "LEADERSHIP", "STRESS_TOLERANCE", "COURAGE"
+  isPublished     Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([testType])
+  @@index([isPublished])
+}
+
+// Option 6 & 7: GTO & Military Planning Exercise (MPE) Tasks
+model GtoTask {
+  id              String   @id @default(uuid())
+  taskType        String   // "PGT" | "HGT" | "COMMAND_TASK" | "MPE" | "LECTURETTE" | "GD"
+  title           String
+  description     String
+  mapImageUrl     String?  // Model board layout for MPE, obstacle diagram for PGT
+  resources       String?  // JSON list of materials: ropes, planks, load, vehicles
+  rules           String?  // Red rule, blue rule, boundary rules
+  modelSolution   String?  // Step-by-step bridging strategy / MPE time-distance plan
+  timeAllowedMin  Int      @default(30)
+  isPublished     Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([taskType])
+}
+
+// Option 8: Board Interview Questions Bank
+model InterviewQuestion {
+  id              String   @id @default(uuid())
+  category        String   // "PIQ" | "DEFENSE_GK" | "GEOPOLITICS" | "PSYCH_STRESS" | "ETHICAL"
+  questionText    String
+  guidelines      String?  // Ideal approach and OLQ traits assessed
+  counterQuestions String? // JSON list of potential follow-up questions
+  isPublished     Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([category])
+}
+
+// Option 9: Physical Obstacles & Conditioning Guide
+model PhysicalObstacle {
+  id              String   @id @default(uuid())
+  obstacleNumber  Int      @unique // 1 through 9
+  name            String   // "Long Jump", "Tiger Leap", "Tarzan Swing", etc.
+  marks           Int      @default(5)
+  imageUrl        String?
+  techniqueGuide  String
+  commonMistakes  String?
+  orderStrategy   String?  // Advice on timing and stamina conservation
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 }
 
 model QuestionImportJob {

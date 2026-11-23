@@ -13,6 +13,7 @@ import paymentsRoutes from './routes/payments';
 import adminRoutes from './routes/admin';
 import homeRoutes from './routes/home';
 import aiRoutes from './routes/ai';
+import modulesRoutes from './routes/modules';
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -63,6 +64,7 @@ app.use('/api/payments', paymentsRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/home', homeRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/modules', modulesRoutes);
 
 // Root Welcome
 app.get('/', (req, res) => {

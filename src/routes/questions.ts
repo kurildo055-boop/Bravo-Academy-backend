@@ -7,13 +7,14 @@ const router = Router();
 // GET /api/questions
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { categoryId, difficulty, search, page: rawPage, limit: rawLimit } = req.query;
+    const { categoryId, difficulty, search, iqSection, random, page: rawPage, limit: rawLimit } = req.query;
     const page = parseInt(String(rawPage || '1'), 10);
     const limit = parseInt(String(rawLimit || '20'), 10);
 
     const where: any = { isPublished: true };
     if (categoryId) where.categoryId = String(categoryId);
     if (difficulty) where.difficulty = String(difficulty);
+    if (iqSection && iqSection !== 'ALL') where.iqSection = String(iqSection);
     if (search) {
       where.OR = [
         { questionText: { contains: String(search), mode: 'insensitive' } },
@@ -21,7 +22,7 @@ router.get('/', async (req: Request, res: Response) => {
       ];
     }
 
-    const [total, questions, categories] = await Promise.all([
+    const [total, questionsRaw, categories] = await Promise.all([
       prisma.question.count({ where }),
       prisma.question.findMany({
         where,
@@ -30,11 +31,16 @@ router.get('/', async (req: Request, res: Response) => {
           category: true,
         },
         orderBy: { createdAt: 'desc' },
-        skip: (page - 1) * limit,
-        take: limit,
+        skip: random === 'true' ? 0 : (page - 1) * limit,
+        take: random === 'true' ? 200 : limit,
       }),
       prisma.examCategory.findMany()
     ]);
+
+    let questions = questionsRaw;
+    if (random === 'true') {
+      questions = [...questionsRaw].sort(() => 0.5 - Math.random()).slice(0, limit);
+    }
 
     return res.json({
       success: true,
@@ -60,7 +66,7 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: 'Admin permission required.' });
     }
 
-    const { questionText, categoryId, subcategory, difficulty, options, correctAnswer, explanation, timeLimitSec, tags, imageUrl } = req.body;
+    const { questionText, categoryId, iqSection, subcategory, difficulty, options, correctAnswer, explanation, timeLimitSec, tags, imageUrl } = req.body;
 
     if (!questionText || !categoryId || !options || !correctAnswer) {
       return res.status(400).json({ success: false, error: 'Missing mandatory fields.' });
@@ -70,6 +76,7 @@ router.post('/', async (req: Request, res: Response) => {
       data: {
         questionText,
         categoryId,
+        iqSection: iqSection || (imageUrl ? 'NON_VERBAL' : 'VERBAL'),
         subcategory: subcategory || 'General',
         difficulty: difficulty || 'MEDIUM',
         questionType: imageUrl ? 'IMAGE_MCQ' : 'MCQ',
@@ -90,6 +97,67 @@ router.post('/', async (req: Request, res: Response) => {
     });
 
     return res.status(201).json({ success: true, question: created });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/questions/:id (Admin Edit Question)
+router.put('/:id', async (req: Request, res: Response) => {
+  try {
+    const auth = extractAuthUser(req);
+    if (!auth || auth.role !== 'ADMIN') {
+      return res.status(403).json({ success: false, error: 'Admin permission required.' });
+    }
+
+    const { id } = req.params;
+    const { questionText, categoryId, iqSection, difficulty, options, correctAnswer, explanation, imageUrl, isPublished } = req.body;
+
+    // Delete existing options and re-create if options provided
+    if (options && typeof options === 'object') {
+      await prisma.questionOption.deleteMany({ where: { questionId: id } });
+      await prisma.questionOption.createMany({
+        data: Object.entries(options).map(([key, text]) => ({
+          questionId: id,
+          key,
+          text: String(text)
+        }))
+      });
+    }
+
+    const updated = await prisma.question.update({
+      where: { id },
+      data: {
+        questionText,
+        categoryId,
+        iqSection,
+        difficulty,
+        correctAnswer,
+        explanation,
+        imageUrl,
+        questionType: imageUrl ? 'IMAGE_MCQ' : 'MCQ',
+        isPublished: isPublished !== undefined ? isPublished : true
+      },
+      include: { options: true, category: true }
+    });
+
+    return res.json({ success: true, question: updated });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/questions/:id (Admin Delete Question)
+router.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const auth = extractAuthUser(req);
+    if (!auth || auth.role !== 'ADMIN') {
+      return res.status(403).json({ success: false, error: 'Admin permission required.' });
+    }
+
+    const { id } = req.params;
+    await prisma.question.delete({ where: { id } });
+    return res.json({ success: true, message: 'Question deleted successfully.' });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
