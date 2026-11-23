@@ -30,18 +30,21 @@ model User {
 }
 
 model StudentProfile {
-  id              String   @id @default(uuid())
-  userId          String   @unique
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  batchNumber     String?
-  hscResult       String?
-  sscResult       String?
-  heightInches    Float?
-  weightKg        Float?
-  medicalStatus   String?
-  preparationGoal String?
-  bio             String?
-  updatedAt       DateTime @updatedAt
+  id                  String   @id @default(uuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  collegeOrUniversity String?
+  studentRoll         String?
+  studentPhotoUrl     String?
+  batchNumber         String?
+  hscResult           String?
+  sscResult           String?
+  heightInches        Float?
+  weightKg            Float?
+  medicalStatus       String?
+  preparationGoal     String?
+  bio                 String?
+  updatedAt           DateTime @updatedAt
 }
 
 model Course {
@@ -64,6 +67,7 @@ model Course {
   updatedAt          DateTime        @updatedAt
 
   enrollments        Enrollment[]
+  payments           Payment[]
 }
 
 model Enrollment {
@@ -82,22 +86,29 @@ model Enrollment {
 }
 
 model Payment {
-  id             String    @id @default(uuid())
-  userId         String
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  courseId       String
-  amount         Float
-  currency       String    @default("BDT")
-  paymentMethod  String    // "BKASH" | "NAGAD"
-  transactionId  String?   @unique
-  invoiceNumber  String    @unique
-  status         String    @default("PENDING") // "PENDING" | "COMPLETED" | "FAILED" | "CANCELLED"
-  gatewayRef     String?
-  senderNumber   String?
-  createdAt      DateTime  @default(now())
-  verifiedAt     DateTime?
+  id                  String    @id @default(uuid())
+  userId              String
+  user                User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  courseId            String
+  course              Course    @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  amount              Float
+  currency            String    @default("BDT")
+  paymentMethod       String    // "BKASH" | "NAGAD"
+  transactionId       String?   @unique
+  invoiceNumber       String    @unique
+  status              String    @default("PENDING") // "PENDING" | "PENDING_APPROVAL" | "COMPLETED" | "REJECTED"
+  gatewayRef          String?
+  senderNumber        String?
+  collegeOrUniversity String?
+  studentRoll         String?
+  studentPhotoUrl     String?
+  notes               String?
+  adminRemark         String?
+  createdAt           DateTime  @default(now())
+  verifiedAt          DateTime?
 
   @@index([userId])
+  @@index([courseId])
   @@index([transactionId])
 }
 

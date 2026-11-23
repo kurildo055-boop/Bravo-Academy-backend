@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import crypto from 'crypto';
 import prisma from '../lib/prisma';
 import { hashPassword, comparePassword, signJwtToken, extractAuthUser } from '../lib/auth';
 
@@ -64,6 +65,7 @@ router.post('/register', async (req: Request, res: Response) => {
         email: user.email,
         role: user.role,
         targetForce: user.targetForce,
+        enrollments: []
       },
       token
     });
@@ -86,8 +88,15 @@ router.post('/login', async (req: Request, res: Response) => {
     const user = await prisma.user.findUnique({
       where: { email: normalizedEmail },
       include: {
+        studentProfile: true,
         enrollments: {
-          where: { status: 'ACTIVE', expiresAt: { gt: new Date() } }
+          where: { status: 'ACTIVE', expiresAt: { gt: new Date() } },
+          include: { course: true }
+        },
+        payments: {
+          where: { status: 'PENDING_APPROVAL' },
+          include: { course: true },
+          take: 1
         }
       }
     });
@@ -126,12 +135,121 @@ router.post('/login', async (req: Request, res: Response) => {
         email: user.email,
         role: user.role,
         targetForce: user.targetForce,
-        enrollments: user.enrollments
+        avatarUrl: user.avatarUrl,
+        studentProfile: user.studentProfile,
+        enrollments: user.enrollments,
+        pendingPayment: user.payments[0] || null
       },
       token
     });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message || 'Login failed.' });
+  }
+});
+
+// POST /api/auth/google (Google Sign-In)
+router.post('/google', async (req: Request, res: Response) => {
+  try {
+    const { email, name, picture, googleId } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ success: false, error: 'Google account email is required.' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    let user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+      include: {
+        studentProfile: true,
+        enrollments: {
+          include: { course: true }
+        },
+        payments: {
+          where: { status: 'PENDING_APPROVAL' },
+          include: { course: true },
+          take: 1
+        }
+      }
+    });
+
+    if (!user) {
+      // Create new student user via Google
+      const randomPassword = crypto.randomBytes(16).toString('hex');
+      const passwordHash = await hashPassword(randomPassword);
+
+      user = await prisma.user.create({
+        data: {
+          name: name ? name.trim() : normalizedEmail.split('@')[0],
+          email: normalizedEmail,
+          passwordHash,
+          role: 'STUDENT',
+          targetForce: 'ARMY',
+          avatarUrl: picture || null,
+          studentProfile: {
+            create: {
+              preparationGoal: 'Preparing for Bangladesh Armed Forces Officer Commission'
+            }
+          }
+        },
+        include: {
+          studentProfile: true,
+          enrollments: {
+            include: { course: true }
+          },
+          payments: {
+            include: { course: true },
+            take: 1
+          }
+        }
+      });
+    } else if (picture && !user.avatarUrl) {
+      // Update avatar if not already set
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { avatarUrl: picture }
+      });
+      user.avatarUrl = picture;
+    }
+
+    const role = user.role === 'ADMIN' ? 'ADMIN' : 'STUDENT';
+
+    const token = signJwtToken({
+      userId: user.id,
+      email: user.email,
+      role: role as 'STUDENT' | 'ADMIN',
+      name: user.name
+    });
+
+    res.cookie('bravo_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60 * 1000
+    });
+
+    const activeEnrollments = user.enrollments.filter(
+      (e) => e.status === 'ACTIVE' && new Date(e.expiresAt) > new Date()
+    );
+
+    return res.json({
+      success: true,
+      message: 'Google authentication successful.',
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        targetForce: user.targetForce,
+        avatarUrl: user.avatarUrl,
+        studentProfile: user.studentProfile,
+        enrollments: activeEnrollments,
+        pendingPayment: user.payments[0] || null
+      },
+      token
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message || 'Google sign-in failed.' });
   }
 });
 
@@ -149,6 +267,7 @@ router.get('/me', async (req: Request, res: Response) => {
         id: true,
         name: true,
         email: true,
+        phone: true,
         role: true,
         targetForce: true,
         avatarUrl: true,
@@ -157,6 +276,11 @@ router.get('/me', async (req: Request, res: Response) => {
           include: {
             course: true
           }
+        },
+        payments: {
+          where: { status: 'PENDING_APPROVAL' },
+          include: { course: true },
+          take: 1
         }
       }
     });
@@ -165,7 +289,19 @@ router.get('/me', async (req: Request, res: Response) => {
       return res.status(404).json({ success: false, user: null });
     }
 
-    return res.json({ success: true, user });
+    const activeEnrollments = user.enrollments.filter(
+      (e) => e.status === 'ACTIVE' && new Date(e.expiresAt) > new Date()
+    );
+
+    return res.json({
+      success: true,
+      user: {
+        ...user,
+        enrollments: activeEnrollments,
+        allEnrollments: user.enrollments,
+        pendingPayment: user.payments[0] || null
+      }
+    });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }

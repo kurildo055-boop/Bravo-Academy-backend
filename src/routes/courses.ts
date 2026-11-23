@@ -7,9 +7,12 @@ const router = Router();
 // GET /api/courses
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { force, category } = req.query;
+    const { force, category, all } = req.query;
 
-    const where: any = { status: 'PUBLISHED' };
+    const where: any = {};
+    if (all !== 'true') {
+      where.status = 'PUBLISHED';
+    }
     if (force && force !== 'ALL') {
       where.targetForce = { in: [String(force), 'ALL'] };
     }
@@ -28,7 +31,7 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/courses
+// POST /api/courses (Admin Create Course)
 router.post('/', async (req: Request, res: Response) => {
   try {
     const auth = extractAuthUser(req);
@@ -36,19 +39,61 @@ router.post('/', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: 'Unauthorized: Command admin access required.' });
     }
 
-    const { title, slug, description, targetForce, regularPrice, discountPrice, validityDays, includedFeatures, curriculum } = req.body;
+    const {
+      title,
+      slug,
+      description,
+      thumbnail,
+      targetForce,
+      category,
+      regularPrice,
+      discountPrice,
+      validityDays,
+      durationWeeks,
+      status,
+      isFeatured,
+      includedFeatures,
+      curriculum
+    } = req.body;
+
+    if (!title || !description) {
+      return res.status(400).json({ success: false, error: 'Title and description are required.' });
+    }
+
+    const finalSlug = slug || title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+    // Handle features: can be array or string
+    let featuresJson = '[]';
+    if (Array.isArray(includedFeatures)) {
+      featuresJson = JSON.stringify(includedFeatures);
+    } else if (typeof includedFeatures === 'string') {
+      featuresJson = includedFeatures;
+    }
+
+    // Handle curriculum: can be array or string
+    let curriculumJson = '[]';
+    if (Array.isArray(curriculum)) {
+      curriculumJson = JSON.stringify(curriculum);
+    } else if (typeof curriculum === 'string') {
+      curriculumJson = curriculum;
+    }
 
     const course = await prisma.course.create({
       data: {
-        title,
-        slug: slug || title.toLowerCase().replace(/[^a-z0-9]+/g, '-'),
-        description,
+        title: title.trim(),
+        slug: finalSlug,
+        description: description.trim(),
+        thumbnail: thumbnail || null,
         targetForce: targetForce || 'ALL',
+        category: category || 'ISSB_FULL',
         regularPrice: Number(regularPrice) || 5000,
         discountPrice: Number(discountPrice) || 2999,
         validityDays: Number(validityDays) || 90,
-        includedFeatures: typeof includedFeatures === 'string' ? includedFeatures : JSON.stringify(includedFeatures || []),
-        curriculum: typeof curriculum === 'string' ? curriculum : JSON.stringify(curriculum || [])
+        durationWeeks: Number(durationWeeks) || 8,
+        status: status || 'PUBLISHED',
+        isFeatured: Boolean(isFeatured),
+        includedFeatures: featuresJson,
+        curriculum: curriculumJson,
       }
     });
 
@@ -58,7 +103,7 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/courses/:id
+// GET /api/courses/:id (by ID or Slug)
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -78,7 +123,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// PUT /api/courses/:id
+// PUT /api/courses/:id (Admin Update Course)
 router.put('/:id', async (req: Request, res: Response) => {
   try {
     const auth = extractAuthUser(req);
@@ -87,13 +132,50 @@ router.put('/:id', async (req: Request, res: Response) => {
     }
 
     const body = req.body;
+    const {
+      title,
+      slug,
+      description,
+      thumbnail,
+      targetForce,
+      category,
+      regularPrice,
+      discountPrice,
+      validityDays,
+      durationWeeks,
+      status,
+      isFeatured,
+      includedFeatures,
+      curriculum
+    } = body;
+
+    let featuresJson = undefined;
+    if (includedFeatures !== undefined) {
+      featuresJson = Array.isArray(includedFeatures) ? JSON.stringify(includedFeatures) : String(includedFeatures);
+    }
+
+    let curriculumJson = undefined;
+    if (curriculum !== undefined) {
+      curriculumJson = Array.isArray(curriculum) ? JSON.stringify(curriculum) : String(curriculum);
+    }
+
     const updated = await prisma.course.update({
       where: { id: req.params.id },
       data: {
-        ...body,
-        regularPrice: body.regularPrice ? Number(body.regularPrice) : undefined,
-        discountPrice: body.discountPrice ? Number(body.discountPrice) : undefined,
-        validityDays: body.validityDays ? Number(body.validityDays) : undefined,
+        title: title ? title.trim() : undefined,
+        slug: slug || undefined,
+        description: description ? description.trim() : undefined,
+        thumbnail: thumbnail !== undefined ? thumbnail : undefined,
+        targetForce: targetForce || undefined,
+        category: category || undefined,
+        regularPrice: regularPrice !== undefined ? Number(regularPrice) : undefined,
+        discountPrice: discountPrice !== undefined ? Number(discountPrice) : undefined,
+        validityDays: validityDays !== undefined ? Number(validityDays) : undefined,
+        durationWeeks: durationWeeks !== undefined ? Number(durationWeeks) : undefined,
+        status: status || undefined,
+        isFeatured: isFeatured !== undefined ? Boolean(isFeatured) : undefined,
+        includedFeatures: featuresJson,
+        curriculum: curriculumJson,
       }
     });
 
@@ -103,16 +185,32 @@ router.put('/:id', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /api/courses/:id
+// DELETE /api/courses/:id (Admin Delete Course)
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const auth = extractAuthUser(req);
     if (!auth || auth.role !== 'ADMIN') {
-      return res.status(403).json({ success: false, error: 'Unauthorized' });
+      return res.status(403).json({ success: false, error: 'Unauthorized: Command admin access required.' });
     }
 
-    await prisma.course.delete({ where: { id: req.params.id } });
-    return res.json({ success: true, message: 'Course removed' });
+    const { id } = req.params;
+
+    const existing = await prisma.course.findUnique({
+      where: { id }
+    });
+
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Course not found in database.' });
+    }
+
+    await prisma.course.delete({
+      where: { id }
+    });
+
+    return res.json({
+      success: true,
+      message: `Course "${existing.title}" deleted from database.`
+    });
   } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
